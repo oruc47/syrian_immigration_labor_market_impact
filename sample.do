@@ -1,3 +1,12 @@
+/*
+author: muhammed ikbal oruc
+mail: moruc23@ku.edu.tr
+
+FULL CODING SAMPLES INCLUDING OTHER LANGUAGE CAN BE FOUND AT:
+
+https://oruc47.github.io/coding/
+*/
+
 clear
 
 cls
