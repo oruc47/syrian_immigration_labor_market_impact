@@ -6,24 +6,26 @@ use "HLFS_1percent.dta"
 
 
 /*
-
-The data is a one percent sample from the Turkish Household Labor Force Survey.
-The following do-file shows at the high level shows the difference in 
-difference analysis to observe the the impact of Syrian immigration on 
-the labor market outcomes of Turkish natives. The code also includes how to 
-do instrument variable analysis with 
-
+Sample STATA code to study the impact of Syrian immigration on Turkish Native labor market outcomes. The file uses a 1% sample of the 
+Turkish Household Labor Force Survey. This sample goes over the 
+following process:
+- Difference-in-Difference without the use of a package
+- Difference-in-Difference across multiple regions and time and continous variables
+- STATA cluster options
+- Bootstrapping
+- Instrument Variable Analysis
+- Placebo Analysis
+- Synthetic Control
 */
 
 
 *Keep age-range only working population
+
 keep if age>=18 & age<=64
 
 /*
-
 Tabulate employment status, we intentionally want to include missing values
 and nolabel so we can better generate the "employed" variable. 
-
 */
 
 *******************************************************************************
@@ -130,8 +132,10 @@ gen treatment_post = treatment * post
 
 gen age2 = age^2
 
-*marital_status contains married, unmarried, divorce, widowed.
-*generating married only if married and not missing value
+/*
+marital_status contains married, unmarried, divorce, widowed.
+generating married only if married and not missing value
+*/
 
 gen married = (marital_status==2) if marital_status !=.
 
@@ -208,7 +212,6 @@ reg employed i.nuts2 i.year treatment_post $controls if male==0 [pw=weight], rob
 egen nuts2_year = group(nuts2 year)
 
 /*
-
 We do this because the data we used is a cluster sample. If we define each 
 cluster to be a region and a year then we get 243 clusters. It is important 
 when regressions with Stata to specify that the data is cluster sampled. 
@@ -217,7 +220,6 @@ shocks that impact Adana in 2004 will differ from Istanbul. If Stata does not
 know that these individuals are sampled from different clusters then there 
 will be an underestimation in the variation. If you run two regressions one 
 with clustering and one without you can observe the difference.
-
 */
 
 reg employed i.nuts2 i.year treatment_post $controls if male==0 [pw=weight], robust
@@ -301,17 +303,16 @@ restore
 *******************************************************************************
 
 /*
-
 We will now do diff-in-diff using the migrant to population for each nuts2 
 region in Turkey. The outcome of interest now goes from discrete to continous.
 
 migrant_ratios_by_nuts2_long.dta contains the data containing these ratios 
 by region and year. 
-
 */ 
 
 
 *We first sort the data to ensure more efficent matching with the new data
+
 sort nuts2 year
 
 /*
@@ -410,13 +411,18 @@ By defining dep as a global variable if we want to change the variable that
 will be observed in the common trend easily. This is especially useful 
 in cases where we are running multiple regressions at the same. 
 */
+
 global dep formal_wage
 
 *Baseline trend regression comparing ratio across regions and years
+
 reg $dep ratio i.nuts2 i.year $controls if male==1 [pw=weight], robust
 
-*Tests for paralell trends across regions and year
-*Note that # only interacts region and years (continous)
+/*
+Tests for paralell trends across regions and year
+Note that # only interacts region and years (continous)
+*/
+
 reg $dep ratio i.nuts2 i.year i.region#c.year $controls if male==1 [pw=weight], robust
 
 *Tests for linear trends across higher level regions (nuts1)
@@ -445,6 +451,7 @@ pattern for each region and time as an instrument
 
 
 *merge instrument data
+
 sort nuts2 year
 
 merge nuts2 using instrument_crosscountry_long.dta
@@ -452,17 +459,21 @@ merge nuts2 using instrument_crosscountry_long.dta
 tab year _merge
 
 *Replace the instrument with 0 for pre-treatment years
+
 replace inst_crosscountry = 0 if year<2012
 
 *Comparing the two regressions we see very different coefficents for ratio
+
 reg employed ratio i.nuts2 i.year i.nuts1#c.year $controls if male==0 [pw=weight], cluster(nuts2year)
 
 ivregress 2sls employed (ratio=inst_crosscountry) i.nuts2 i.year i.nuts1#c.year $controls if male==0 [pw=weight], cluster(nuts2year) first
 
 *Durbin,Wu-Hausman test of endogeneity
+
 estat endogenous, forceweights
 
 *Tests for the strength of instruments
+
 estat firststage, forcenonrobust all
 
 exit
@@ -479,9 +490,11 @@ did not occur in the pre-treatment.
 */
 
 *In this case we pick the ratio from 2015
+
 gen ratio15 = ratio if year==2015
 
 *However, a lot of missing values generated
+
 twoway (scatter ratio15 year)
 
 
@@ -495,9 +508,11 @@ value of ratio15
 by nuts2: replace ratio15 = ratio15[_N]
 
 *Now the missing values are also replaced
+
 twoway (scatter ratio15 year)
 
 *We define dependent variable again to easily change outcome of interest
+
 local dep informal
 
 
@@ -519,12 +534,10 @@ reg $dep ib2011.year#c.ratio15 i.nuts2 ib2011.year ratio15 i.nuts1#c.year if mal
 // ssc install coefplot
 
 /*
-
 We then plot each coefficent interacting the pre-trend years with the ratios 
 along with their confidence intervals. Looking at the plot we can see the 
 the "trend" stays the same throughout each year and that all of the cofficents 
 are not satistically significant. 
-
 */
 
 coefplot, vertical yline(0) nolabel keep(2006.year#c.ratio15 2007.year#c.ratio15 2008.year#c.ratio15 2009.year#c.ratio15 2010.year#c.ratio15 2013.year#c.ratio15 2014.year#c.ratio15 2015.year#c.ratio15) coeflabels(2006.year#c.ratio15=2006 2007.year#c.ratio15=2007 2008.year#c.ratio15=2008 2009.year#c.ratio15=2009 2010.year#c.ratio15=2010 2013.year#c.ratio15=2013 2014.year#c.ratio15=2014 2015.year#c.ratio15=2015)
@@ -543,28 +556,32 @@ would provide a synthetic control.
 
 
 *Define the treated region that needs a synthetic control
+
 gen treated = (nuts2 == 5)
 
 *Define the post treatment years
+
 gen post_treatment = (year >= 2011)
 
 *Keep only the non-missing values of the variables that would be used for weighting matrix
+
 keep nuts2 year treated informal age male educ_attain urban ratio15 sector literate
 
 drop if missing(informal, age, male, educ_attain, urban, ratio15, sector, literate)
 
 *Calculate the mean of selected variables and collapse the data
+
 collapse (mean) informal age male educ_attain urban ratio15 sector literate, by(nuts2 year)
 
 *Specify the data to be panel data by tsset
+
 sort nuts2 year
 
 tsset nuts2 year
 
 *Run synth command on variables and by setting trunit() and trperiod() to the values above
-synth informal age male educ_attain urban ratio15 sector literate, trunit(5) trperiod(2011) fig
 
-exit
+synth informal age male educ_attain urban ratio15 sector literate, trunit(5) trperiod(2011) fig
 
 /*Another example of synthetic control using California to test 
 whether or not tobacco control leads to reduce smoking. 
@@ -572,8 +589,12 @@ whether or not tobacco control leads to reduce smoking.
 state, using a synthetic control is useful to see the impact.
 */ 
 
-*Running the below code compares California's averages for all observation variable 
-*and how it compares to average of all other control states
+
+/*
+Running the below code compares California's averages for all observation variable 
+and how it compares to average of all other control states
+*/
+
 use mus225smoking.dta, clear
 
 drop if year > 1989
@@ -604,6 +625,7 @@ use mus225smoking.dta, clear
 tsset state year
 
 *specificy treated unit and treatperiod to find the weights
+
 synth cigsale beer lnincome retprice age15to24 cigsale, trunit(3) trperiod(1989) fig
 
 
